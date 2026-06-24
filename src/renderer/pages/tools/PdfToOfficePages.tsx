@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { ArrowLeft, FileText, Loader2, Info } from 'lucide-react';
 import FileSelector from '../../components/FileSelector';
 import ResultScreen from './shared/ResultScreen';
+import { extractPdfText } from './shared/extractText';
+import { renderPdfPagesToJpeg, getPageCount } from './shared/renderHighRes';
 import { LicenseStatus } from '../../types';
 
 type Target = 'word' | 'powerpoint' | 'excel';
@@ -23,8 +25,11 @@ export default function PdfToOfficePages({ onBack, target }: PdfToOfficePagesPro
   const [files, setFiles] = useState<{ path: string; name: string; size: number }[]>([]);
   const [outputPath, setOutputPath] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [successPath, setSuccessPath] = useState<string | null>(null);
+  // Word only: 'exact' embeds page images (preserves layout), 'editable' extracts text
+  const [wordMode, setWordMode] = useState<'exact' | 'editable'>('exact');
 
   const fileSelected = files[0]?.path || null;
 
@@ -48,15 +53,69 @@ export default function PdfToOfficePages({ onBack, target }: PdfToOfficePagesPro
     if (!fileSelected) return;
     setIsProcessing(true);
     setErrorMsg('');
+    setStatusMsg('');
     try {
-      const res = await window.electronAPI.convertPdfToOffice(fileSelected, outputPath, target);
+      const baseName = (files[0].name || 'document').replace(/\.[^/.]+$/, '');
+      const outFilePath = `${outputPath}/${baseName}_converted.${meta.ext}`;
+
+      if (target === 'powerpoint') {
+        setStatusMsg('Rendering slides...');
+        const pageCount = await getPageCount(fileSelected);
+        const pageNumbers = Array.from({ length: pageCount }, (_, i) => i + 1);
+        const rendered = await renderPdfPagesToJpeg(fileSelected, pageNumbers, 2, 0.9);
+        const res = await window.electronAPI.convertPdfToOffice(target, outFilePath, {
+          sourcePath: fileSelected,
+          images: rendered.map((r) => ({ base64: r.base64Data, width: r.width, height: r.height })),
+        });
+        if (res.success && res.outputPath) setSuccessPath(res.outputPath);
+        return;
+      }
+
+      if (target === 'word' && wordMode === 'exact') {
+        // Embed each page as a full-page image — preserves layout exactly.
+        setStatusMsg('Rendering pages...');
+        const pageCount = await getPageCount(fileSelected);
+        const pageNumbers = Array.from({ length: pageCount }, (_, i) => i + 1);
+        const rendered = await renderPdfPagesToJpeg(fileSelected, pageNumbers, 2.5, 0.92);
+        const res = await window.electronAPI.convertPdfToOffice(target, outFilePath, {
+          sourcePath: fileSelected,
+          mode: 'exact',
+          images: rendered.map((r) => ({ base64: r.base64Data, width: r.width, height: r.height })),
+        });
+        if (res.success && res.outputPath) setSuccessPath(res.outputPath);
+        return;
+      }
+
+      // Editable text path (Word editable mode + Excel): use the text layer, OCR if absent.
+      setStatusMsg('Extracting text...');
+      let pages = await extractPdfText(fileSelected);
+      const totalChars = pages.reduce((sum, p) => sum + p.lines.join('').length, 0);
+
+      if (totalChars < 10) {
+        setStatusMsg('No text layer found — running OCR (this may take a moment)...');
+        const pageCount = await getPageCount(fileSelected);
+        const pageNumbers = Array.from({ length: pageCount }, (_, i) => i + 1);
+        const rendered = await renderPdfPagesToJpeg(fileSelected, pageNumbers, 2.5, 0.92);
+        const texts = await window.electronAPI.ocrImageTexts(rendered.map((r) => r.base64Data));
+        pages = texts.map((t) => ({
+          lines: t.split('\n').map((l) => l.replace(/\s+$/, '')).filter((l) => l.length > 0),
+        }));
+      }
+
+      setStatusMsg('Building document...');
+      const res = await window.electronAPI.convertPdfToOffice(target, outFilePath, {
+        sourcePath: fileSelected,
+        mode: 'editable',
+        pages,
+      });
       if (res.success && res.outputPath) {
         setSuccessPath(res.outputPath);
       }
     } catch (err: any) {
-      setErrorMsg(err.message || 'An error occurred during conversion. Make sure LibreOffice is installed and configured in Settings > Advanced.');
+      setErrorMsg(err.message || 'An error occurred during conversion.');
     } finally {
       setIsProcessing(false);
+      setStatusMsg('');
     }
   };
 
@@ -100,7 +159,11 @@ export default function PdfToOfficePages({ onBack, target }: PdfToOfficePagesPro
               Reverse Conversion (.{meta.ext})
             </h3>
             <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
-              Convert your PDF into an editable {meta.label} offline using LibreOffice headless. Results depend on the source PDF structure.
+              {target === 'powerpoint'
+                ? 'Each PDF page becomes a slide image. Runs fully offline with no extra software required.'
+                : target === 'word'
+                ? 'Converts your PDF to Word offline. Choose exact layout (preserves everything) or editable text below.'
+                : `Extracts the text from your PDF into an editable ${meta.label}. Runs fully offline with no extra software required.`}
             </p>
           </div>
 
@@ -109,6 +172,38 @@ export default function PdfToOfficePages({ onBack, target }: PdfToOfficePagesPro
               <p className="text-[10px] text-muted-foreground font-extrabold uppercase tracking-wider">Source Document</p>
               <p className="text-sm font-bold text-foreground mt-1 truncate">{files[0].name}</p>
             </div>
+
+            {target === 'word' && (
+              <div className="space-y-2">
+                <label className="text-[10px] text-muted-foreground font-extrabold uppercase tracking-wider">Conversion Mode</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setWordMode('exact')}
+                    className={`p-3 rounded-xl border text-left transition-colors ${
+                      wordMode === 'exact'
+                        ? 'bg-primary/10 border-primary text-foreground'
+                        : 'bg-card border-border text-muted-foreground hover:border-primary/30'
+                    }`}
+                  >
+                    <p className="text-xs font-bold text-foreground">Exact layout</p>
+                    <p className="text-[10px] leading-snug mt-0.5">Looks identical to the PDF. Best fidelity. Not text-editable.</p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWordMode('editable')}
+                    className={`p-3 rounded-xl border text-left transition-colors ${
+                      wordMode === 'editable'
+                        ? 'bg-primary/10 border-primary text-foreground'
+                        : 'bg-card border-border text-muted-foreground hover:border-primary/30'
+                    }`}
+                  >
+                    <p className="text-xs font-bold text-foreground">Editable text</p>
+                    <p className="text-[10px] leading-snug mt-0.5">Fully editable text. Layout is approximate. OCR for scans.</p>
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-2">
               <label className="text-[10px] text-muted-foreground font-extrabold uppercase tracking-wider">Save Destination</label>
@@ -131,7 +226,9 @@ export default function PdfToOfficePages({ onBack, target }: PdfToOfficePagesPro
             <div className="p-3 bg-primary/5 border border-primary/10 rounded-xl text-[10px] text-primary font-bold flex items-start gap-2">
               <Info className="w-4 h-4 shrink-0" />
               <span>
-                Image-only / scanned PDFs may not convert to editable text. For best results use the OCR tool first.
+                {target === 'powerpoint'
+                  ? 'Slides are built from page images, so they look identical to the PDF but are not text-editable.'
+                  : 'Scanned/image-only PDFs have no embedded text. Run the OCR tool first to make them convertible.'}
               </span>
             </div>
 
@@ -149,7 +246,7 @@ export default function PdfToOfficePages({ onBack, target }: PdfToOfficePagesPro
               {isProcessing ? (
                 <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  Running Local LibreOffice...
+                  {statusMsg || 'Converting...'}
                 </>
               ) : (
                 <>

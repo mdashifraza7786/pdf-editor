@@ -211,6 +211,14 @@ const TOOLS: ToolInfo[] = [
     icon: 'EyeOff',
     isPremium: true,
   },
+  {
+    id: 'compare',
+    name: 'Compare PDF',
+    description: 'View two PDFs side by side or overlaid to spot differences.',
+    category: 'edit',
+    icon: 'GitCompare',
+    isPremium: true,
+  },
 ];
 
 export default function Home({ onSelectTool, license }: HomeProps) {

@@ -45,7 +45,7 @@ function createWindow() {
   });
 }
 
-// Security: restrict navigation and set CSP headers
+// Security: restrict navigation and external window creation (CSP is set in index.html)
 app.on('web-contents-created', (_event, contents) => {
   contents.on('will-navigate', (event) => {
     event.preventDefault();

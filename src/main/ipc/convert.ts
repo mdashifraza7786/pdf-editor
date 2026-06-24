@@ -2,12 +2,15 @@ import { ipcMain, BrowserWindow } from 'electron';
 import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
-import { exec, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import { checkBatchLimits, checkToolAccess } from '../license';
 import { saveHistory, getSetting } from '../db';
 import crypto from 'crypto';
 import { getLibreOfficePath, getGhostscriptPath } from '../utils/binResolver';
 import { PDFDocument } from 'pdf-lib';
+import { Document, Packer, Paragraph, TextRun, PageBreak, ImageRun } from 'docx';
+import * as XLSX from 'xlsx';
+import PptxGenJS from 'pptxgenjs';
 
 export function registerConvertHandlers() {
   // Office conversions to PDF (Word/PPTX/Excel/HTML -> PDF)
@@ -26,11 +29,11 @@ export function registerConvertHandlers() {
 
         const runLibreOffice = () => {
           return new Promise<string>((resolve, reject) => {
-            const cmd = `"${loPath}" --headless --convert-to pdf --outdir "${outputFolder}" "${filePath}"`;
-            exec(cmd, (error) => {
+            const args = ['--headless', '--convert-to', 'pdf', '--outdir', outputFolder, filePath];
+            execFile(loPath, args, (error) => {
               if (error) {
                 if (!fsSync.existsSync(loPath)) {
-                  reject(new Error(`LibreOffice soffice binary not found at "${loPath}". Please install LibreOffice or verify the path in Settings > Advanced.`));
+                  reject(new Error(`LibreOffice is required for this conversion but was not found. Install it (on macOS: "brew install --cask libreoffice") or set the soffice path in Settings > Advanced.`));
                 } else {
                   reject(new Error(`LibreOffice execution failed: ${error.message}`));
                 }
@@ -223,82 +226,144 @@ export function registerConvertHandlers() {
     }
   );
 
-  // PDF to Office (Word / PowerPoint / Excel) via headless LibreOffice reverse conversion
+  // PDF to Office (Word / PowerPoint / Excel) — pure JS, no external binary required.
+  // Two strategies depending on what the renderer sends:
+  //   - mode 'exact'    : embed each page as a full-page image (preserves layout exactly, not editable)
+  //   - mode 'editable' : rebuild from extracted/OCR'd text (editable, approximate layout)
   ipcMain.handle(
     'tool:pdf-to-office',
     async (
       _event,
-      filePath: string,
-      outputFolder: string,
-      target: 'word' | 'powerpoint' | 'excel'
+      target: 'word' | 'powerpoint' | 'excel',
+      outputPath: string,
+      payload: {
+        sourcePath: string;
+        mode?: 'editable' | 'exact';
+        pages?: { lines: string[] }[];
+        images?: { base64: string; width: number; height: number }[];
+      }
     ) => {
       const check = checkToolAccess('pdf2office');
       if (!check.allowed) throw new Error(check.reason);
 
-      const limit = checkBatchLimits([filePath]);
+      const limit = checkBatchLimits([payload.sourcePath]);
       if (!limit.allowed) throw new Error(limit.reason);
 
-      // Map target to LibreOffice output extension/filter
-      const targetMap: Record<string, { ext: string; filter: string; label: string }> = {
-        word: { ext: 'docx', filter: 'docx:MS Word 2007 XML', label: 'PDF to Word' },
-        powerpoint: { ext: 'pptx', filter: 'pptx:Impress MS PowerPoint 2007 XML', label: 'PDF to PowerPoint' },
-        excel: { ext: 'xlsx', filter: 'xlsx:Calc MS Excel 2007 XML', label: 'PDF to Excel' },
+      const labelMap: Record<string, string> = {
+        word: 'PDF to Word',
+        powerpoint: 'PDF to PowerPoint',
+        excel: 'PDF to Excel',
       };
-      const conf = targetMap[target];
-      if (!conf) throw new Error(`Unsupported conversion target: ${target}`);
+      const label = labelMap[target] || 'PDF to Office';
+      const pages = payload.pages || [];
+      const images = payload.images || [];
 
       const historyId = crypto.randomUUID();
       try {
-        const loPath = getLibreOfficePath(getSetting('libreoffice_path', ''));
-
-        const runLibreOffice = () => {
-          return new Promise<string>((resolve, reject) => {
-            const args = [
-              '--headless',
-              '--infilter=writer_pdf_import',
-              '--convert-to',
-              conf.filter,
-              '--outdir',
-              outputFolder,
-              filePath,
-            ];
-            execFile(loPath, args, (error, stdout, stderr) => {
-              if (error) {
-                if (!fsSync.existsSync(loPath)) {
-                  reject(new Error(`LibreOffice soffice binary not found at "${loPath}". Please install LibreOffice or verify the path in Settings > Advanced.`));
-                } else {
-                  reject(new Error(`LibreOffice conversion failed: ${stderr || error.message}`));
-                }
-              } else {
-                const baseName = path.basename(filePath, path.extname(filePath));
-                const expectedOut = path.join(outputFolder, `${baseName}.${conf.ext}`);
-                resolve(expectedOut);
-              }
+        if (target === 'word' && payload.mode === 'exact') {
+          // Full-page image per page — looks identical to the source PDF.
+          if (images.length === 0) {
+            throw new Error('No page images were provided for the exact-layout conversion.');
+          }
+          const children: Paragraph[] = [];
+          images.forEach((im, idx) => {
+            const buf = Buffer.from(im.base64, 'base64');
+            // Fit each page image to the printable width (~6.5in @ 96dpi = 624px)
+            const targetW = 624;
+            const targetH = Math.round(targetW * (im.height / im.width || 1.414));
+            children.push(
+              new Paragraph({
+                children: [
+                  new ImageRun({
+                    type: 'jpg',
+                    data: buf,
+                    transformation: { width: targetW, height: targetH },
+                  }),
+                ],
+              })
+            );
+            if (idx < images.length - 1) {
+              children.push(new Paragraph({ children: [new PageBreak()] }));
+            }
+          });
+          const doc = new Document({
+            sections: [
+              {
+                properties: { page: { margin: { top: 360, bottom: 360, left: 360, right: 360 } } },
+                children,
+              },
+            ],
+          });
+          const buffer = await Packer.toBuffer(doc);
+          await fs.writeFile(outputPath, buffer);
+        } else if (target === 'word') {
+          const paragraphs: Paragraph[] = [];
+          pages.forEach((pg, pageIdx) => {
+            const lines = pg.lines.length ? pg.lines : [''];
+            lines.forEach((line) => {
+              paragraphs.push(new Paragraph({ children: [new TextRun(line)] }));
+            });
+            if (pageIdx < pages.length - 1) {
+              paragraphs.push(new Paragraph({ children: [new PageBreak()] }));
+            }
+          });
+          if (paragraphs.length === 0) {
+            paragraphs.push(new Paragraph({ children: [new TextRun('')] }));
+          }
+          const doc = new Document({ sections: [{ children: paragraphs }] });
+          const buffer = await Packer.toBuffer(doc);
+          await fs.writeFile(outputPath, buffer);
+        } else if (target === 'excel') {
+          const wb = XLSX.utils.book_new();
+          pages.forEach((pg, pageIdx) => {
+            const rows = (pg.lines.length ? pg.lines : ['']).map((line) =>
+              line.split(/\s{2,}/).map((c) => c.trim())
+            );
+            const ws = XLSX.utils.aoa_to_sheet(rows);
+            const sheetName = `Page ${pageIdx + 1}`.slice(0, 31);
+            XLSX.utils.book_append_sheet(wb, ws, sheetName);
+          });
+          if (pages.length === 0) {
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['']]), 'Page 1');
+          }
+          const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+          await fs.writeFile(outputPath, buf);
+        } else {
+          // powerpoint: one slide per page, page image fitted full-slide
+          const pptx = new PptxGenJS();
+          if (images.length === 0) {
+            throw new Error('No page images were provided for the PowerPoint conversion.');
+          }
+          images.forEach((im) => {
+            const slide = pptx.addSlide();
+            slide.addImage({
+              data: `data:image/jpeg;base64,${im.base64}`,
+              x: 0,
+              y: 0,
+              w: '100%',
+              h: '100%',
+              sizing: { type: 'contain', w: 10, h: 5.63 },
             });
           });
-        };
-
-        const resultPath = await runLibreOffice();
-
-        if (!fsSync.existsSync(resultPath)) {
-          throw new Error('Conversion completed but the output file could not be located. The PDF may be image-only or unsupported for reverse conversion.');
+          const buf = (await pptx.write({ outputType: 'nodebuffer' })) as Buffer;
+          await fs.writeFile(outputPath, buf);
         }
 
         saveHistory({
           id: historyId,
-          tool_name: conf.label,
-          input_files: [filePath],
-          output_file: resultPath,
+          tool_name: label,
+          input_files: [payload.sourcePath],
+          output_file: outputPath,
           status: 'SUCCESS'
         });
 
-        return { success: true, outputPath: resultPath };
+        return { success: true, outputPath };
       } catch (error: any) {
         saveHistory({
           id: historyId,
-          tool_name: conf.label,
-          input_files: [filePath],
-          output_file: outputFolder,
+          tool_name: label,
+          input_files: [payload.sourcePath],
+          output_file: outputPath,
           status: 'FAILED',
           error_message: error.message
         });

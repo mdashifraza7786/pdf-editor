@@ -50,6 +50,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('tool:repair', filePath, outputPath),
   runOCR: (filePath: string, outputPath: string, language?: string) =>
     ipcRenderer.invoke('tool:ocr', filePath, outputPath, language),
+  ocrImageTexts: (images: string[], language?: string) =>
+    ipcRenderer.invoke('tool:ocr-image-texts', images, language),
   onOcrProgress: (callback: (data: { status: string; progress: number }) => void) => {
     const subscription = (_event: any, data: { status: string; progress: number }) => callback(data);
     ipcRenderer.on('ocr:progress', subscription);
@@ -77,10 +79,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ) => ipcRenderer.invoke('tool:save-rendered-pages', pdfPath, pages, outputFolder),
 
   convertPdfToOffice: (
-    filePath: string,
-    outputFolder: string,
-    target: 'word' | 'powerpoint' | 'excel'
-  ) => ipcRenderer.invoke('tool:pdf-to-office', filePath, outputFolder, target),
+    target: 'word' | 'powerpoint' | 'excel',
+    outputPath: string,
+    payload: {
+      sourcePath: string;
+      mode?: 'editable' | 'exact';
+      pages?: { lines: string[] }[];
+      images?: { base64: string; width: number; height: number }[];
+    }
+  ) => ipcRenderer.invoke('tool:pdf-to-office', target, outputPath, payload),
   convertPdfToPdfA: (filePath: string, outputPath: string) =>
     ipcRenderer.invoke('tool:pdf-to-pdfa', filePath, outputPath),
   convertHtmlToPdf: (

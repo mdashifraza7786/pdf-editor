@@ -28,6 +28,7 @@ import PdfToPdfaPages from './pages/tools/PdfToPdfaPages';
 import HtmlToPdfPages from './pages/tools/HtmlToPdfPages';
 import SignPages from './pages/tools/SignPages';
 import RedactPages from './pages/tools/RedactPages';
+import ComparePages from './pages/tools/ComparePages';
 
 export default function App() {
   const [currentPath, setCurrentPath] = useState('/');
@@ -117,6 +118,8 @@ export default function App() {
           return <SignPages onBack={onBack} license={license} />;
         case 'redact':
           return <RedactPages onBack={onBack} license={license} />;
+        case 'compare':
+          return <ComparePages onBack={onBack} license={license} />;
         default:
           return <Home onSelectTool={handleSelectTool} license={license} />;
       }

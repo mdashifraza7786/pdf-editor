@@ -2,7 +2,7 @@ import { ipcMain, app } from 'electron';
 import { PDFDocument } from 'pdf-lib';
 import fs from 'fs/promises';
 import fsSync from 'fs';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { checkBatchLimits, checkToolAccess } from '../license';
 import { saveHistory, getSetting } from '../db';
 import crypto from 'crypto';
@@ -32,8 +32,17 @@ export function registerOptimizeHandlers() {
 
         const runGhostscript = () => {
           return new Promise<void>((resolve, reject) => {
-            const cmd = `"${gsPath}" -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dPDFSETTINGS=${settingsArg} -dNOPAUSE -dQUIET -dBATCH -sOutputFile="${outputPath}" "${filePath}"`;
-            exec(cmd, (error) => {
+            const args = [
+              '-sDEVICE=pdfwrite',
+              '-dCompatibilityLevel=1.4',
+              `-dPDFSETTINGS=${settingsArg}`,
+              '-dNOPAUSE',
+              '-dQUIET',
+              '-dBATCH',
+              `-sOutputFile=${outputPath}`,
+              filePath,
+            ];
+            execFile(gsPath, args, (error) => {
               if (error) {
                 if (!fsSync.existsSync(gsPath)) {
                   reject(new Error(`Ghostscript binary not found at "${gsPath}". Please install Ghostscript on your system or verify the path in Settings > Advanced.`));
@@ -96,8 +105,8 @@ export function registerOptimizeHandlers() {
 
       const runGhostscriptRepair = () => {
         return new Promise<void>((resolve, reject) => {
-          const cmd = `"${gsPath}" -o "${outputPath}" -sDEVICE=pdfwrite "${filePath}"`;
-          exec(cmd, (error) => {
+          const args = ['-o', outputPath, '-sDEVICE=pdfwrite', filePath];
+          execFile(gsPath, args, (error) => {
             if (error) {
               if (!fsSync.existsSync(gsPath)) {
                 reject(new Error(`Ghostscript binary not found at "${gsPath}". Please install Ghostscript on your system or verify the path in Settings > Advanced.`));
@@ -194,8 +203,15 @@ export function registerOptimizeHandlers() {
 
           const renderPdfPages = () => {
             return new Promise<void>((resolve, reject) => {
-              const cmd = `"${gsPath}" -dNOPAUSE -dBATCH -sDEVICE=jpeg -r150 -sOutputFile="${tempDir}/page-%d.jpg" "${filePath}"`;
-              exec(cmd, (error) => {
+              const args = [
+                '-dNOPAUSE',
+                '-dBATCH',
+                '-sDEVICE=jpeg',
+                '-r150',
+                `-sOutputFile=${path.join(tempDir, 'page-%d.jpg')}`,
+                filePath,
+              ];
+              execFile(gsPath, args, (error) => {
                 if (error) {
                   reject(new Error(`Failed to render PDF pages using Ghostscript: ${error.message}`));
                 } else {
@@ -286,6 +302,41 @@ export function registerOptimizeHandlers() {
           error_message: error.message
         });
         throw error;
+      }
+    }
+  );
+
+  // OCR a set of page images and return the recognized text per image.
+  // Used as a fallback for PDF -> Word/Excel when the PDF has no text layer.
+  ipcMain.handle(
+    'tool:ocr-image-texts',
+    async (event, images: string[], language = 'eng') => {
+      const tessDataPath = getTesseractDataPath(getSetting('tesseract_data_path', ''));
+      if (!fsSync.existsSync(tessDataPath)) {
+        throw new Error(`Tesseract traineddata folder not found at "${tessDataPath}". Please make sure it is configured correctly in Settings > Advanced.`);
+      }
+
+      const resolvedWorkerPath = path.join(app.getAppPath(), 'node_modules/tesseract.js/src/worker-script/node/index.js');
+      const worker = await createWorker(language, 1, {
+        workerPath: resolvedWorkerPath,
+        cachePath: tessDataPath,
+        gzip: false,
+      });
+
+      try {
+        const texts: string[] = [];
+        for (let i = 0; i < images.length; i++) {
+          event.sender.send('ocr:progress', {
+            status: `Recognizing page ${i + 1} of ${images.length}`,
+            progress: (i + 1) / images.length,
+          });
+          const buffer = Buffer.from(images[i], 'base64');
+          const { data: { text } } = await worker.recognize(buffer);
+          texts.push(text);
+        }
+        return texts;
+      } finally {
+        await worker.terminate();
       }
     }
   );

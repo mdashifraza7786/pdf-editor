@@ -7,7 +7,14 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url
 ).toString();
 
-export function usePdfRenderer(filePath: string | null) {
+/**
+ * Renders every page of a PDF to a data URL for previews.
+ *
+ * `baseScale` controls sharpness relative to the PDF's native size. We also
+ * multiply by the device pixel ratio (capped) so previews stay crisp on
+ * high-DPI / Retina displays instead of looking blurry when scaled up in CSS.
+ */
+export function usePdfRenderer(filePath: string | null, baseScale = 1.5) {
   const [pages, setPages] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -33,14 +40,16 @@ export function usePdfRenderer(filePath: string | null) {
         const pdf = await loadingTask.promise;
         if (isCancelled) return;
 
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const renderScale = baseScale * dpr;
+
         const totalPages = pdf.numPages;
         const tempPages: string[] = [];
 
         for (let i = 1; i <= totalPages; i++) {
           if (isCancelled) return;
           const page = await pdf.getPage(i);
-          // Scale optimized for clean visual thumbnails
-          const viewport = page.getViewport({ scale: 0.35 });
+          const viewport = page.getViewport({ scale: renderScale });
           const canvas = document.createElement('canvas');
           const context = canvas.getContext('2d');
           canvas.height = viewport.height;
@@ -49,7 +58,8 @@ export function usePdfRenderer(filePath: string | null) {
           await page.render({ canvasContext: context!, viewport }).promise;
           if (isCancelled) return;
 
-          tempPages.push(canvas.toDataURL('image/jpeg', 0.85));
+          // High JPEG quality keeps text edges sharp in previews
+          tempPages.push(canvas.toDataURL('image/jpeg', 0.92));
         }
 
         if (!isCancelled) {
@@ -72,7 +82,7 @@ export function usePdfRenderer(filePath: string | null) {
     return () => {
       isCancelled = true;
     };
-  }, [filePath]);
+  }, [filePath, baseScale]);
 
   return { pages, loading, error };
 }

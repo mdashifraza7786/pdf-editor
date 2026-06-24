@@ -77,10 +77,11 @@ export default function MergePages({ onBack, license }: MergePagesProps) {
           const loadingTask = pdfjsLib.getDocument({ data: binaryData });
           const pdf = await loadingTask.promise;
 
+          const dpr = Math.min(window.devicePixelRatio || 1, 2);
           for (let i = 1; i <= pdf.numPages; i++) {
             if (isCancelled) return;
             const page = await pdf.getPage(i);
-            const viewport = page.getViewport({ scale: 0.25 }); // optimized smaller merge preview
+            const viewport = page.getViewport({ scale: 0.8 * dpr }); // crisp merge thumbnails
             const canvas = document.createElement('canvas');
             const context = canvas.getContext('2d');
             canvas.height = viewport.height;
@@ -92,7 +93,7 @@ export default function MergePages({ onBack, license }: MergePagesProps) {
               filePath: file.path,
               fileName: file.name,
               pageNumber: i,
-              dataUrl: canvas.toDataURL('image/jpeg', 0.8),
+              dataUrl: canvas.toDataURL('image/jpeg', 0.9),
             });
           }
         }

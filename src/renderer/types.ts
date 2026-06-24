@@ -49,6 +49,7 @@ declare global {
       compressPDF: (filePath: string, outputPath: string, level: 'extreme' | 'recommended' | 'low') => Promise<{ success: boolean; outputPath: string }>;
       repairPDF: (filePath: string, outputPath: string) => Promise<{ success: boolean; outputPath: string }>;
       runOCR: (filePath: string, outputPath: string, language?: string) => Promise<{ success: boolean; outputPath: string }>;
+      ocrImageTexts: (images: string[], language?: string) => Promise<string[]>;
       onOcrProgress: (callback: (data: { status: string; progress: number }) => void) => () => void;
 
       // Convert Tools
@@ -69,9 +70,14 @@ declare global {
       ) => Promise<{ success: boolean; outputFiles: string[] }>;
 
       convertPdfToOffice: (
-        filePath: string,
-        outputFolder: string,
-        target: 'word' | 'powerpoint' | 'excel'
+        target: 'word' | 'powerpoint' | 'excel',
+        outputPath: string,
+        payload: {
+          sourcePath: string;
+          mode?: 'editable' | 'exact';
+          pages?: { lines: string[] }[];
+          images?: { base64: string; width: number; height: number }[];
+        }
       ) => Promise<{ success: boolean; outputPath: string }>;
       convertPdfToPdfA: (filePath: string, outputPath: string) => Promise<{ success: boolean; outputPath: string }>;
       convertHtmlToPdf: (

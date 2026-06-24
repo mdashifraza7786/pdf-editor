@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import fsSync from 'fs';
 import { checkBatchLimits, checkToolAccess } from '../license';
 import { saveHistory, getSetting } from '../db';
@@ -30,8 +30,17 @@ export function registerSecurityHandlers() {
 
         const runGhostscriptProtect = () => {
           return new Promise<void>((resolve, reject) => {
-            const cmd = `"${gsPath}" -q -dNOPAUSE -dBATCH -sDEVICE=pdfwrite -sOwnerPassword="${ownerPwd}" -sUserPassword="${userPassword}" -sOutputFile="${outputPath}" "${filePath}"`;
-            exec(cmd, (error) => {
+            const args = [
+              '-q',
+              '-dNOPAUSE',
+              '-dBATCH',
+              '-sDEVICE=pdfwrite',
+              `-sOwnerPassword=${ownerPwd}`,
+              `-sUserPassword=${userPassword}`,
+              `-sOutputFile=${outputPath}`,
+              filePath,
+            ];
+            execFile(gsPath, args, (error) => {
               if (error) {
                 if (!fsSync.existsSync(gsPath)) {
                   reject(new Error(`Ghostscript binary not found at "${gsPath}". Please check your Advanced settings or install Ghostscript.`));
@@ -82,12 +91,13 @@ export function registerSecurityHandlers() {
       const historyId = crypto.randomUUID();
       try {
         const gsPath = getGhostscriptPath(getSetting('ghostscript_path', ''));
-        const pwdArg = password ? `-sPassword="${password}"` : '';
 
         const runGhostscriptUnlock = () => {
           return new Promise<void>((resolve, reject) => {
-            const cmd = `"${gsPath}" -q -dNOPAUSE -dBATCH -sDEVICE=pdfwrite ${pwdArg} -sOutputFile="${outputPath}" "${filePath}"`;
-            exec(cmd, (error) => {
+            const args = ['-q', '-dNOPAUSE', '-dBATCH', '-sDEVICE=pdfwrite'];
+            if (password) args.push(`-sPassword=${password}`);
+            args.push(`-sOutputFile=${outputPath}`, filePath);
+            execFile(gsPath, args, (error) => {
               if (error) {
                 if (!fsSync.existsSync(gsPath)) {
                   reject(new Error(`Ghostscript binary not found at "${gsPath}". Please check your Advanced settings or install Ghostscript.`));

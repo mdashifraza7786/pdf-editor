@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ArrowLeft, FileImage, Loader2, Check, Square, CheckSquare } from 'lucide-react';
 import FileSelector from '../../components/FileSelector';
 import usePdfRenderer from './shared/usePdfRenderer';
+import { renderPdfPagesToJpeg } from './shared/renderHighRes';
 import ResultScreen from './shared/ResultScreen';
 import { LicenseStatus } from '../../types';
 
@@ -75,18 +76,10 @@ export default function PdfToJpgPages({ onBack, license }: PdfToJpgPagesProps) {
     setIsProcessing(true);
     setErrorMsg('');
     try {
-      // Map selected pages to the format expected by saveRenderedPages
-      // The base64Data passed to saveRenderedPages should strip the data URL prefix
-      const pagesToConvert = Array.from(selectedPages)
-        .sort((a, b) => a - b)
-        .map((pageNum) => {
-          const dataUrl = pages[pageNum - 1];
-          const base64Data = dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
-          return {
-            pageNumber: pageNum,
-            base64Data,
-          };
-        });
+      // Render the selected pages fresh at high resolution rather than reusing
+      // the low-res preview thumbnails, so exported images are sharp.
+      const sortedPages = Array.from(selectedPages).sort((a, b) => a - b);
+      const pagesToConvert = await renderPdfPagesToJpeg(fileSelected!, sortedPages, 3);
 
       const res = await window.electronAPI.saveRenderedPages(fileSelected!, pagesToConvert, outputPath);
       if (res.success && res.outputFiles) {
