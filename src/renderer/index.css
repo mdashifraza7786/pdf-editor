@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 36 28% 96.5%;     /* Clean warm Claude cream background (#f9f6f0) */
+    --foreground: 20 12% 10%;      /* Claude deep bronze text (#1d1816) */
+
+    --card: 35 30% 98.8%;          /* Paper white (#fdfcfb) */
+    --card-foreground: 20 12% 10%;
+
+    --popover: 36 28% 96.5%;
+    --popover-foreground: 20 12% 10%;
+
+    --primary: 14 58% 53%;         /* Claude Signature Terracotta (#d16b54) */
+    --primary-foreground: 36 100% 98.5%;
+
+    --secondary: 35 22% 91%;       /* Warm sand/beige (#f1ebd9) */
+    --secondary-foreground: 20 12% 10%;
+
+    --muted: 35 22% 91%;
+    --muted-foreground: 24 8% 46%; /* Warm taupe gray (#766e65) */
+
+    --accent: 35 22% 91%;
+    --accent-foreground: 20 12% 10%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 38 18% 98%;
+
+    --border: 35 15% 85.5%;        /* Clean warm border (#ded8c5) */
+    --input: 35 15% 85.5%;
+    --ring: 14 58% 53%;
+
+    --radius: 0.75rem;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(209, 107, 84, 0.2);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(209, 107, 84, 0.4);
+}
+
+/* Glassmorphism details - reimagined as light paper panels */
+.glass-panel {
+  background: rgba(253, 252, 251, 0.85); /* Smooth warm paper card */
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(222, 216, 197, 0.6);
+  box-shadow: 0 2px 8px -3px rgba(29, 24, 22, 0.04);
+}
+
+.glass-panel-hover:hover {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(209, 107, 84, 0.35);
+  box-shadow: 0 10px 25px -10px rgba(209, 107, 84, 0.12);
+}
+
+/* Background grid overlay */
+.bg-grid-overlay {
+  background-size: 40px 40px;
+  background-image: 
+    linear-gradient(to right, rgba(209, 107, 84, 0.012) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(209, 107, 84, 0.012) 1px, transparent 1px);
+}

@@ -1,0 +1,50 @@
+appId: com.ilovepdf.offline-clone
+productName: iLovePDF-Local
+directories:
+  output: dist-pack
+files:
+  - dist/**/*
+  - node_modules/**/*
+  - package.json
+extraResources:
+  - from: resources/tesseract-data/
+    to: tesseract-data/
+    filter:
+      - "**/*"
+mac:
+  target:
+    - dmg
+  category: public.app-category.productivity
+  extraResources:
+    - from: resources/ghostscript/mac/
+      to: ghostscript/
+      filter:
+        - "**/*"
+    - from: resources/libreoffice/mac/
+      to: libreoffice/
+      filter:
+        - "**/*"
+win:
+  target:
+    - nsis
+  extraResources:
+    - from: resources/ghostscript/win/
+      to: ghostscript/
+      filter:
+        - "**/*"
+    - from: resources/libreoffice/win/
+      to: libreoffice/
+      filter:
+        - "**/*"
+linux:
+  target:
+    - AppImage
+  extraResources:
+    - from: resources/ghostscript/linux/
+      to: ghostscript/
+      filter:
+        - "**/*"
+    - from: resources/libreoffice/linux/
+      to: libreoffice/
+      filter:
+        - "**/*"
